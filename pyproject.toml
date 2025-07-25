@@ -1,0 +1,19 @@
+[project]
+name = "ssdv2"
+version = "0.1.0"
+description = "Second generation SSD network."
+authors = [
+    {name = "Kyle Newman", email = "kyle@thenewmans.com.au"},
+]
+dependencies = []
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "GPLv3"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[tool.pdm]
+distribution = true
