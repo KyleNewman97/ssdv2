@@ -50,17 +50,48 @@ class TestDatasetManager:
 
             yield temp_dir
 
-    def test_init_valid_dataset(self, valid_dataset_dir: Path):
+    def test_init(self):
         """
-        Tests we can initialise a dataset that is structured correctly.
+        Test we can initialise a dataset manager.
         """
-        manager = DatasetManager(valid_dataset_dir)
+        manager = DatasetManager(Path("tests_dir"))
         assert isinstance(manager, DatasetManager)
 
-    def test_init_invalid_dataset(self, invalid_dataset_dir: Path):
+    def test_verify_dataset_structure_valid(self, valid_dataset_dir: Path):
         """
-        Test we get a DatasetError when initialising on an invalid dataset dir.
+        Tests correct dataset structures raise no errors.
         """
+        manager = DatasetManager(valid_dataset_dir)
+        manager.verify_dataset_structure()
+
+    def test_verify_dataset_structure_invalid(self, invalid_dataset_dir: Path):
+        """
+        Test we get a DatasetError when checking an invalid dataset.
+        """
+        manager = DatasetManager(invalid_dataset_dir)
         with pytest.raises(DatasetError) as err:
-            DatasetManager(invalid_dataset_dir)
+            manager.verify_dataset_structure()
         assert "Images dir:" in err.value.args[0]
+
+    def test_create_dataset(self):
+        """
+        Test that we can make the dataset folder structure correctly.
+        """
+        with TemporaryDirectory() as dir:
+            temp_dir = Path(dir)
+            manager = DatasetManager(temp_dir)
+
+            # Try to create the dataset
+            manager.create_dataset({0: "person", 1: "car"})
+
+            # Ensure it was made correctly
+            manager.verify_dataset_structure()
+
+    def test_create_dataset_existing_dataset(self, valid_dataset_dir: Path):
+        """
+        Test that we throw an error when trying to create a dataset in a folder that
+        already contains a dataset.
+        """
+        manager = DatasetManager(valid_dataset_dir)
+        with pytest.raises(FileExistsError):
+            manager.create_dataset({0: "person"})

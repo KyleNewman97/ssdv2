@@ -1,13 +1,16 @@
+import json
 from pathlib import Path
 
 from ssdv2.structs.exceptions import DatasetError
 
 
 class DatasetManager:
+    """
+    Manages the directory structure of a dataset.
+    """
+
     def __init__(self, dataset_dir: Path):
         self.dataset_dir = dataset_dir
-
-        self._verify_dataset_structure()
 
     @property
     def images_dir(self) -> Path:
@@ -37,7 +40,7 @@ class DatasetManager:
     def class_file(self) -> Path:
         return self.dataset_dir / "classes.json"
 
-    def _verify_dataset_structure(self):
+    def verify_dataset_structure(self):
         """
         Verify that the directory structure is correct.
         """
@@ -64,3 +67,31 @@ class DatasetManager:
 
         if not self.val_labels_dir.is_dir():
             raise DatasetError(f"Val labels dir: {self.val_labels_dir} not a dir.")
+
+    def create_dataset(self, class_names: dict[int, str]):
+        """
+        Creates the folders and the `classes.json` file for the dataset.
+
+        Paramaters
+        ----------
+        class_names:
+            A map of class ID to class name. The contents of this is saved to the
+            `classes.json` file.
+        """
+
+        # Root level folder structure
+        self.dataset_dir.mkdir(exist_ok=True)
+        self.images_dir.mkdir()
+        self.labels_dir.mkdir()
+
+        # Images folder structure
+        self.train_images_dir.mkdir()
+        self.val_images_dir.mkdir()
+
+        # Labels folder structure
+        self.train_labels_dir.mkdir()
+        self.val_labels_dir.mkdir()
+
+        # Create class ID to name mapping file
+        with open(self.class_file, "w") as fp:
+            json.dump(class_names, fp)
