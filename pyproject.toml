@@ -2,13 +2,11 @@
 name = "ssdv2"
 version = "0.1.0"
 description = "Second generation SSD network."
-authors = [
-    {name = "Kyle Newman", email = "kyle@thenewmans.com.au"},
-]
+authors = [{ name = "Kyle Newman", email = "kyle@thenewmans.com.au" }]
 dependencies = []
 requires-python = ">=3.11"
 readme = "README.md"
-license = {text = "GPLv3"}
+license = { text = "GPLv3" }
 
 [build-system]
 requires = ["pdm-backend"]
@@ -17,3 +15,6 @@ build-backend = "pdm.backend"
 
 [tool.pdm]
 distribution = true
+
+[dependency-groups]
+dev = ["notebook>=7.4.4", "fiftyone>=1.7.1", "pytest>=8.4.1"]
