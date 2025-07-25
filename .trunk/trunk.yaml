@@ -30,6 +30,8 @@ lint:
     - trufflehog@3.90.2
     - yamllint@1.37.1
 actions:
+  disabled:
+    - git-lfs
   enabled:
     - trunk-announce
     - trunk-check-pre-push
