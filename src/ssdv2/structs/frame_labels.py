@@ -28,6 +28,14 @@ class FrameLabels(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    @property
+    def object_class_names(self) -> list[str]:
+        """
+        List of the class names of objects in the frame.
+        """
+        class_ids = self.raw_class_ids.cpu().tolist()
+        return [self.raw_class_names[id] for id in class_ids]
+
     @classmethod
     def from_file(
         cls,

@@ -40,6 +40,26 @@ class TestFrameLabels:
         assert objects.boxes.allclose(boxes)
         assert objects.raw_class_ids.equal(class_ids)
 
+    def test_object_class_names(self):
+        """
+        Test we can correctly list the classes in the image.
+        """
+        dtype = torch.float32
+        device = torch.device("cpu")
+
+        # Create dummy data
+        boxes = torch.rand((3, 4), dtype=dtype, device=device)
+        class_ids = torch.tensor([0, 1, 0], dtype=torch.int, device=device)
+        class_names = {0: "person", 1: "dog", 2: "cat"}
+
+        objects = FrameLabels(
+            boxes=boxes, raw_class_ids=class_ids, raw_class_names=class_names
+        )
+
+        assert isinstance(objects.object_class_names, list)
+        assert len(objects.object_class_names) == class_ids.shape[0]
+        assert objects.object_class_names == ["person", "dog", "person"]
+
     def test_from_file_valid_file(self, raw_class_names: dict[int, str]):
         """
         Test we can create a `FrameLabels` object from a valid label file.
