@@ -14,7 +14,9 @@ class TestDatasetManager:
             temp_dir = Path(dir)
 
             # Make the classes file
-            (temp_dir / "classes.json").touch()
+            classes_file = temp_dir / "classes.json"
+            with open(classes_file, "w") as fp:
+                fp.write('{"0": "person"}')
 
             # Make images and labels dirs
             images_dir = temp_dir / "images"
@@ -42,7 +44,9 @@ class TestDatasetManager:
             temp_dir = Path(dir)
 
             # Make the classes file
-            (temp_dir / "classes.json").touch()
+            classes_file = temp_dir / "classes.json"
+            with open(classes_file, "w") as fp:
+                fp.write('{"0": "person"}')
 
             # Make the labels dirs
             labels_dir = temp_dir / "labels"
@@ -50,48 +54,39 @@ class TestDatasetManager:
 
             yield temp_dir
 
-    def test_init(self):
-        """
-        Test we can initialise a dataset manager.
-        """
-        manager = DatasetManager(Path("tests_dir"))
-        assert isinstance(manager, DatasetManager)
-
-    def test_verify_dataset_structure_valid(self, valid_dataset_dir: Path):
+    def test_init_valid_dataset(self, valid_dataset_dir: Path):
         """
         Tests correct dataset structures raise no errors.
         """
         manager = DatasetManager(valid_dataset_dir)
-        manager.verify_dataset_structure()
+        assert isinstance(manager, DatasetManager)
 
-    def test_verify_dataset_structure_invalid(self, invalid_dataset_dir: Path):
+    def test_init_invalid_dataset(self, invalid_dataset_dir: Path):
         """
         Test we get a DatasetError when checking an invalid dataset.
         """
-        manager = DatasetManager(invalid_dataset_dir)
         with pytest.raises(DatasetError) as err:
-            manager.verify_dataset_structure()
+            DatasetManager(invalid_dataset_dir)
         assert "Images dir:" in err.value.args[0]
 
-    def test_create_dataset(self):
+    def test_create_new_dataset(self):
         """
         Test that we can make the dataset folder structure correctly.
         """
         with TemporaryDirectory() as dir:
-            temp_dir = Path(dir)
-            manager = DatasetManager(temp_dir)
+            root_dir = Path(dir)
+            class_names = {0: "person", 1: "car"}
 
             # Try to create the dataset
-            manager.create_dataset({0: "person", 1: "car"})
+            manager = DatasetManager.create_new_dataset(root_dir, class_names)
 
-            # Ensure it was made correctly
-            manager.verify_dataset_structure()
+        assert isinstance(manager, DatasetManager)
 
-    def test_create_dataset_existing_dataset(self, valid_dataset_dir: Path):
+    def test_create_new_dataset_existing_dataset(self, valid_dataset_dir: Path):
         """
         Test that we throw an error when trying to create a dataset in a folder that
         already contains a dataset.
         """
-        manager = DatasetManager(valid_dataset_dir)
+        class_names = {0: "person"}
         with pytest.raises(FileExistsError):
-            manager.create_dataset({0: "person"})
+            DatasetManager.create_new_dataset(valid_dataset_dir, class_names)

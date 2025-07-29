@@ -10,7 +10,59 @@ class DatasetManager:
     """
 
     def __init__(self, dataset_dir: Path):
+        """
+        Initialise a DatasetManager for an existing dataset.
+
+        Parameters
+        ----------
+        dataset_dir:
+            The root folder of the dataset.
+        """
+        # Check that the classes file exists
+        classes_file = dataset_dir / "classes.json"
+        if not classes_file.is_file():
+            raise DatasetError(f"No classes file at {classes_file}.")
+
+        # Read in the contents of the classes file
+        with open(classes_file, "r") as fp:
+            class_names: dict[int, str] = json.load(fp)
+
         self.dataset_dir = dataset_dir
+        self.class_names = class_names
+        self.verify_dataset_structure()
+
+    @classmethod
+    def create_new_dataset(
+        cls, dataset_dir: Path, class_names: dict[int, str]
+    ) -> "DatasetManager":
+        """
+        Creates the folders and the `classes.json` file for the dataset.
+
+        Paramaters
+        ----------
+        class_names:
+            A map of class ID to class name. The contents of this is saved to the
+            `classes.json` file.
+        """
+
+        # Root level folder structure
+        dataset_dir.mkdir(exist_ok=True)
+        (dataset_dir / "images").mkdir()
+        (dataset_dir / "labels").mkdir()
+
+        # Images folder structure
+        (dataset_dir / "images/train").mkdir()
+        (dataset_dir / "images/val").mkdir()
+
+        # Labels folder structure
+        (dataset_dir / "labels/train").mkdir()
+        (dataset_dir / "labels/val").mkdir()
+
+        # Create class ID to name mapping file
+        with open(dataset_dir / "classes.json", "w") as fp:
+            json.dump(class_names, fp)
+
+        return cls(dataset_dir)
 
     @property
     def images_dir(self) -> Path:
@@ -67,31 +119,3 @@ class DatasetManager:
 
         if not self.val_labels_dir.is_dir():
             raise DatasetError(f"Val labels dir: {self.val_labels_dir} not a dir.")
-
-    def create_dataset(self, class_names: dict[int, str]):
-        """
-        Creates the folders and the `classes.json` file for the dataset.
-
-        Paramaters
-        ----------
-        class_names:
-            A map of class ID to class name. The contents of this is saved to the
-            `classes.json` file.
-        """
-
-        # Root level folder structure
-        self.dataset_dir.mkdir(exist_ok=True)
-        self.images_dir.mkdir()
-        self.labels_dir.mkdir()
-
-        # Images folder structure
-        self.train_images_dir.mkdir()
-        self.val_images_dir.mkdir()
-
-        # Labels folder structure
-        self.train_labels_dir.mkdir()
-        self.val_labels_dir.mkdir()
-
-        # Create class ID to name mapping file
-        with open(self.class_file, "w") as fp:
-            json.dump(class_names, fp)
