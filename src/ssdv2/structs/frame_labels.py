@@ -22,12 +22,19 @@ class FrameLabels(BaseModel):
             "appear like those in the label file."
         )
     )
+    raw_class_names: dict[int, str] = Field(
+        description="A map from class ID to class name."
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @classmethod
     def from_file(
-        cls, file: Path, dtype: torch.dtype, device: torch.device
+        cls,
+        file: Path,
+        raw_class_names: dict[int, str],
+        dtype: torch.dtype,
+        device: torch.device,
     ) -> "FrameLabels":
         """
         Initialise a `FrameLabels` object from a label file.
@@ -41,6 +48,9 @@ class FrameLabels(BaseModel):
                 class_id, cx, cy, w, h
                 ...
                 ```
+
+        raw_class_names:
+            A map of raw class IDs to class names.
 
         dtype:
             The type to use within the boxes tensor.
@@ -71,12 +81,24 @@ class FrameLabels(BaseModel):
                 center_y = float(elements[2])
                 width = float(elements[3])
                 height = float(elements[4])
+
+                # Check the class ID is valid
+                if class_id not in raw_class_names:
+                    raise ValueError(f"Invalid class ID: {class_id}")
+
                 class_ids.append(class_id)
                 boxes.append((center_x, center_y, width, height))
 
+        boxes_tensor = torch.tensor(boxes, dtype=dtype, device=device)
+
+        # Check the boxes are within the range of [0, 1]
+        if boxes_tensor.min() < 0 or 1 < boxes_tensor.max():
+            raise ValueError("Box coords must be between 0 and 1 inclusive.")
+
         return FrameLabels(
-            boxes=torch.tensor(boxes, dtype=dtype, device=device),
+            boxes=boxes_tensor,
             raw_class_ids=torch.tensor(class_ids, dtype=torch.int, device=device),
+            raw_class_names=raw_class_names,
         )
 
     def to_file(self, file: Path):
@@ -120,3 +142,38 @@ class FrameLabels(BaseModel):
             Whether the frame contains an object of the specified type.
         """
         return raw_class_id in self.raw_class_ids
+
+    def change_classes(self, raw_class_ids: Tensor) -> "FrameLabels":
+        """
+        Removes objects that aren't in the specified classes and changes the class
+        names to only contain these classes. This process results in the class IDs being
+        changed so that they remain sequential.
+
+        Parameters
+        ----------
+        raw_class_ids:
+            The classes we wish to keep.
+        """
+        # Filter out all objects that aren't of the specified classes
+        mask = torch.isin(self.raw_class_ids, raw_class_ids)
+        boxes = self.boxes[mask, :]
+        masked_classes = self.raw_class_ids[mask]
+
+        # Change the class IDs
+        raw_class_ids_list = raw_class_ids.cpu().tolist()
+        old_to_new_class_ids = {id: idx for idx, id in enumerate(raw_class_ids_list)}
+        new_classes = masked_classes.clone()
+        for old, new in old_to_new_class_ids.items():
+            new_classes[masked_classes == old] = new
+
+        # Create the new class names dictionary
+        class_names = {
+            idx: self.raw_class_names[id] for idx, id in enumerate(raw_class_ids_list)
+        }
+
+        return FrameLabels(
+            boxes=boxes, raw_class_ids=new_classes, raw_class_names=class_names
+        )
+
+    def __len__(self) -> int:
+        return self.boxes.shape[0]
