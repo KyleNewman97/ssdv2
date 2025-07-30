@@ -1,8 +1,10 @@
 from pathlib import Path
 
+import fiftyone as fo
 import torch
 from pydantic import BaseModel, ConfigDict, Field
 from torch import Tensor
+from torchvision.ops import box_convert
 
 
 class FrameLabels(BaseModel):
@@ -35,6 +37,22 @@ class FrameLabels(BaseModel):
         """
         class_ids = self.raw_class_ids.cpu().tolist()
         return [self.raw_class_names[id] for id in class_ids]
+
+    @property
+    def fo_detections(self) -> fo.Detections:
+        """
+        The objects as fiftyone detections.
+        """
+        class_names = self.object_class_names
+        boxes = box_convert(self.boxes, "cxcywh", "xywh").cpu().tolist()
+
+        # Create the fiftyone detections object
+        return fo.Detections(
+            detections=[
+                fo.Detection(label=class_name, bounding_box=box)
+                for class_name, box in zip(class_names, boxes, strict=True)
+            ]
+        )
 
     @classmethod
     def from_file(

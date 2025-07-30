@@ -3,7 +3,12 @@ name = "ssdv2"
 version = "0.1.0"
 description = "Second generation SSD network."
 authors = [{ name = "Kyle Newman", email = "kyle@thenewmans.com.au" }]
-dependencies = ["pydantic>=2.11.7", "torch>=2.7.1", "torchvision>=0.22.1"]
+dependencies = [
+  "pydantic>=2.11.7",
+  "torch>=2.7.1",
+  "torchvision>=0.22.1",
+  "fiftyone>=1.7.1",
+]
 requires-python = ">=3.11"
 readme = "README.md"
 license = { text = "GPLv3" }
@@ -17,4 +22,4 @@ build-backend = "pdm.backend"
 distribution = true
 
 [dependency-groups]
-dev = ["notebook>=7.4.4", "fiftyone>=1.7.1", "pytest>=8.4.1"]
+dev = ["notebook>=7.4.4", "pytest>=8.4.1"]

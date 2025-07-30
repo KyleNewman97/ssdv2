@@ -2,6 +2,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
+import fiftyone as fo
 import pytest
 import torch
 
@@ -59,6 +60,29 @@ class TestFrameLabels:
         assert isinstance(objects.object_class_names, list)
         assert len(objects.object_class_names) == class_ids.shape[0]
         assert objects.object_class_names == ["person", "dog", "person"]
+
+    def test_fo_detections(self):
+        """
+        Test we can get the objects as fiftyone detections.
+        """
+        dtype = torch.float32
+        device = torch.device("cpu")
+
+        # Create dummy data
+        boxes = torch.tensor([[0.1, 0.2, 0.05, 0.06]], dtype=dtype, device=device)
+        class_ids = torch.tensor([0], dtype=torch.int, device=device)
+        class_names = {0: "person", 1: "dog", 2: "cat"}
+        objects = FrameLabels(
+            boxes=boxes, raw_class_ids=class_ids, raw_class_names=class_names
+        )
+
+        detections = objects.fo_detections
+
+        assert isinstance(detections, fo.Detections)
+        assert len(detections.detections) == boxes.shape[0]  # type: ignore
+        detection: fo.Detection = detections.detections[0]  # type: ignore
+        assert detection.label == "person"
+        assert detection.bounding_box == pytest.approx([0.075, 0.17, 0.05, 0.06])
 
     def test_from_file_valid_file(self, raw_class_names: dict[int, str]):
         """
