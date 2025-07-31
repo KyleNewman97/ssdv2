@@ -23,9 +23,6 @@ class ConvNeXt(nn.Module):
         in_chans:
             Number of input image channels. Default: 3
 
-        num_classes:
-            Number of classes for classification head. Default: 1000
-
         depths:
             Number of blocks at each stage. Default: [3, 3, 9, 3]
 
@@ -37,26 +34,20 @@ class ConvNeXt(nn.Module):
 
         layer_scale_init_value:
             Init value for Layer Scale. Default: 1e-6.
-
-        head_init_scale:
-            Init scaling value for classifier weights and biases. Default: 1.
     """
 
     def __init__(
         self,
         in_chans: int = 3,
-        num_classes: int = 1000,
         depths: list[int] = [3, 3, 9, 3],  # trunk-ignore(ruff/B006)
         dims: list[int] = [96, 192, 384, 768],  # trunk-ignore(ruff/B006)
         drop_path_rate: float = 0.0,
         layer_scale_init_value: float = 1e-6,
-        head_init_scale: float = 1.0,
     ):
         super().__init__()
 
-        self.downsample_layers = (
-            nn.ModuleList()
-        )  # stem and 3 intermediate downsampling conv layers
+        # Stem and 3 intermediate downsampling conv layers
+        self.downsample_layers = nn.ModuleList()
         stem = nn.Sequential(
             nn.Conv2d(in_chans, dims[0], kernel_size=4, stride=4),
             LayerNorm(dims[0], eps=1e-6, data_format="channels_first"),
@@ -69,9 +60,8 @@ class ConvNeXt(nn.Module):
             )
             self.downsample_layers.append(downsample_layer)
 
-        self.stages = (
-            nn.ModuleList()
-        )  # 4 feature resolution stages, each consisting of multiple residual blocks
+        # 4 feature resolution stages, each consisting of multiple residual blocks
+        self.stages = nn.ModuleList()
         dp_rates = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]
         cur = 0
         for i in range(4):
@@ -88,27 +78,18 @@ class ConvNeXt(nn.Module):
             self.stages.append(stage)
             cur += depths[i]
 
-        self.norm = nn.LayerNorm(dims[-1], eps=1e-6)  # final norm layer
-        self.head = nn.Linear(dims[-1], num_classes)
-
         self.apply(self._init_weights)
-        self.head.weight.data.mul_(head_init_scale)
-        self.head.bias.data.mul_(head_init_scale)
 
     def _init_weights(self, m: Module):
         if isinstance(m, (nn.Conv2d, nn.Linear)):
             trunc_normal_(m.weight, std=0.02)
-            nn.init.constant_(m.bias, 0)  # type: ignore #
+            nn.init.constant_(m.bias, 0)  # type: ignore
 
-    def forward_features(self, x: Tensor):
+    def forward(self, x: Tensor) -> list[Tensor]:
+        feature_maps: list[Tensor] = []
         for i in range(4):
             x = self.downsample_layers[i](x)
             x = self.stages[i](x)
-        return self.norm(
-            x.mean([-2, -1])
-        )  # global average pooling, (N, C, H, W) -> (N, C)
+            feature_maps.append(x)
 
-    def forward(self, x: Tensor):
-        x = self.forward_features(x)
-        x = self.head(x)
-        return x
+        return feature_maps
