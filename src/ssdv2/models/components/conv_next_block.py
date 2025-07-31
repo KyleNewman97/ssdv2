@@ -9,12 +9,12 @@ import torch.nn as nn
 from timm.layers.drop import DropPath
 from torch import Tensor
 
-from ssdv2.models.backbones.convnext.layer_norm import LayerNorm
+from ssdv2.models.components.layer_norm import LayerNorm
 
 
-class Block(nn.Module):
+class ConvNeXtBlock(nn.Module):
     """
-    ConvNeXt Block.
+    ConvNeXtBlock.
 
     There are two equivalent implementations:
 
@@ -24,9 +24,17 @@ class Block(nn.Module):
         -> Linear; Permute back
 
     We use (2) as we find it slightly faster in PyTorch
+    """
 
-    Parameters
-    ----------
+    def __init__(
+        self,
+        dim: int,
+        drop_path: float = 0.0,
+        layer_scale_init_value: float = 1e-6,
+    ):
+        """
+        Parameters
+        ----------
         dim:
             Number of input channels.
 
@@ -35,23 +43,23 @@ class Block(nn.Module):
 
         layer_scale_init_value:
             Init value for Layer Scale. Default: 1e-6.
-    """
+        """
+        nn.Module.__init__(self)
 
-    def __init__(
-        self, dim: int, drop_path: float = 0.0, layer_scale_init_value: float = 1e-6
-    ):
-        super().__init__()
-        self.dwconv = nn.Conv2d(
-            dim, dim, kernel_size=7, padding=3, groups=dim
-        )  # depthwise conv
+        # Depthwise conv
+        self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)
         self.norm = LayerNorm(dim, eps=1e-6)
-        self.pwconv1 = nn.Linear(
-            dim, 4 * dim
-        )  # pointwise/1x1 convs, implemented with linear layers
+
+        # Pointwise/1x1 convs, implemented with linear layers
+        self.pwconv1 = nn.Linear(dim, 4 * dim)
         self.act = nn.GELU()
         self.pwconv2 = nn.Linear(4 * dim, dim)
+
         self.gamma = (
-            nn.Parameter(layer_scale_init_value * torch.ones((dim)), requires_grad=True)
+            nn.Parameter(
+                layer_scale_init_value * torch.ones((dim)),
+                requires_grad=True,
+            )
             if layer_scale_init_value > 0
             else None
         )
