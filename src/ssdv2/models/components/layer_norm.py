@@ -20,8 +20,6 @@ class LayerNorm(nn.Module):
 
     def __init__(
         self,
-        dtype: torch.dtype,
-        device: torch.device,
         normalized_shape: int,
         eps: float = 1e-6,
         data_format: str = "channels_last",
@@ -35,8 +33,6 @@ class LayerNorm(nn.Module):
         if self.data_format not in ["channels_last", "channels_first"]:
             raise NotImplementedError
         self.normalized_shape = (normalized_shape,)
-
-        self.to(dtype=dtype, device=device)
 
     def forward(self, x: Tensor):
         if self.data_format == "channels_last":

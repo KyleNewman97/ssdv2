@@ -8,8 +8,6 @@ from ssdv2.models.components import ConvNeXtBlock
 class ConvNeXtNeck(nn.Module):
     def __init__(
         self,
-        dtype: torch.dtype,
-        device: torch.device,
         depths: list[int] = [3, 3, 3],  # trunk-ignore(ruff/B006)
         dims: list[int] = [576, 672, 720],  # trunk-ignore(ruff/B006)
     ):
@@ -26,12 +24,11 @@ class ConvNeXtNeck(nn.Module):
         self.stages = nn.ModuleList()
         for i in range(len(depths)):
             stage = nn.Sequential(
-                *[ConvNeXtBlock(dtype, device, dim=dims[i]) for _ in range(depths[i])],
+                *[ConvNeXtBlock(dim=dims[i]) for _ in range(depths[i])],
             )
             self.stages.append(stage)
 
         self.apply(self._init_weights)
-        self.to(dtype=dtype, device=device)
 
     def _init_weights(self, m: nn.Module):
         if isinstance(m, (nn.Conv2d, nn.Linear)):

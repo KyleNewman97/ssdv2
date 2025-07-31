@@ -11,7 +11,7 @@ class TestConvNeXtNeck:
         dtype = torch.float32
         device = torch.device("cpu")
 
-        neck = ConvNeXtNeck(dtype, device)
+        neck = ConvNeXtNeck().to(dtype=dtype, device=device)
         assert isinstance(neck, ConvNeXtNeck)
 
     def test_forward(self):
@@ -29,7 +29,8 @@ class TestConvNeXtNeck:
         ]
         dims = [sum([d.shape[1] for d in data[:i]]) for i in range(2, len(data) + 1)]
 
-        neck = ConvNeXtNeck(dtype, device, depths=[3] * len(dims), dims=dims)
+        neck = ConvNeXtNeck(depths=[3] * len(dims), dims=dims)
+        neck = neck.to(dtype=dtype, device=device)
         out = neck.forward(data)
 
         # Check the output type and number of feature maps

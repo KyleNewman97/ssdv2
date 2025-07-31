@@ -24,38 +24,31 @@ class ConvNeXtBlock(nn.Module):
         -> Linear; Permute back
 
     We use (2) as we find it slightly faster in PyTorch
-
-    Parameters
-    ----------
-    dtype:
-        Data type of parameters.
-
-    device:
-        The device to perform computations on.
-
-    dim:
-        Number of input channels.
-
-    drop_path:
-        Stochastic depth rate. Default: 0.0
-
-    layer_scale_init_value:
-        Init value for Layer Scale. Default: 1e-6.
     """
 
     def __init__(
         self,
-        dtype: torch.dtype,
-        device: torch.device,
         dim: int,
         drop_path: float = 0.0,
         layer_scale_init_value: float = 1e-6,
     ):
+        """
+            Parameters
+        ----------
+        dim:
+            Number of input channels.
+
+        drop_path:
+            Stochastic depth rate. Default: 0.0
+
+        layer_scale_init_value:
+            Init value for Layer Scale. Default: 1e-6.
+        """
         nn.Module.__init__(self)
 
         # Depthwise conv
         self.dwconv = nn.Conv2d(dim, dim, kernel_size=7, padding=3, groups=dim)
-        self.norm = LayerNorm(dtype, device, dim, eps=1e-6)
+        self.norm = LayerNorm(dim, eps=1e-6)
 
         # Pointwise/1x1 convs, implemented with linear layers
         self.pwconv1 = nn.Linear(dim, 4 * dim)
@@ -71,8 +64,6 @@ class ConvNeXtBlock(nn.Module):
             else None
         )
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
-
-        self.to(dtype=dtype, device=device)
 
     def forward(self, x: Tensor):
         input = x
