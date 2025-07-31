@@ -8,13 +8,11 @@ import torch
 import torch.nn as nn
 from timm.layers.weight_init import trunc_normal_
 from torch import Tensor
-from torch.nn import Module
 
-from ssdv2.models.backbones.convnext.block import Block
-from ssdv2.models.backbones.convnext.layer_norm import LayerNorm
+from ssdv2.models.components import ConvNeXtBlock, LayerNorm
 
 
-class ConvNeXt(nn.Module):
+class ConvNeXtBackbone(nn.Module):
     """
     ConvNeXt
     A PyTorch impl of : `A ConvNet for the 2020s` - https://arxiv.org/pdf/2201.03545.pdf
@@ -38,24 +36,28 @@ class ConvNeXt(nn.Module):
 
     def __init__(
         self,
-        in_chans: int = 3,
+        dtype: torch.dtype,
+        device: torch.device,
         depths: list[int] = [3, 3, 9, 3],  # trunk-ignore(ruff/B006)
         dims: list[int] = [96, 192, 384, 768],  # trunk-ignore(ruff/B006)
+        in_chans: int = 3,
         drop_path_rate: float = 0.0,
         layer_scale_init_value: float = 1e-6,
     ):
-        super().__init__()
+        nn.Module.__init__(self)
 
         # Stem and 3 intermediate downsampling conv layers
         self.downsample_layers = nn.ModuleList()
         stem = nn.Sequential(
             nn.Conv2d(in_chans, dims[0], kernel_size=4, stride=4),
-            LayerNorm(dims[0], eps=1e-6, data_format="channels_first"),
+            LayerNorm(dtype, device, dims[0], eps=1e-6, data_format="channels_first"),
         )
         self.downsample_layers.append(stem)
         for i in range(3):
             downsample_layer = nn.Sequential(
-                LayerNorm(dims[i], eps=1e-6, data_format="channels_first"),
+                LayerNorm(
+                    dtype, device, dims[i], eps=1e-6, data_format="channels_first"
+                ),
                 nn.Conv2d(dims[i], dims[i + 1], kernel_size=2, stride=2),
             )
             self.downsample_layers.append(downsample_layer)
@@ -67,7 +69,9 @@ class ConvNeXt(nn.Module):
         for i in range(4):
             stage = nn.Sequential(
                 *[
-                    Block(
+                    ConvNeXtBlock(
+                        dtype,
+                        device,
                         dim=dims[i],
                         drop_path=dp_rates[cur + j],
                         layer_scale_init_value=layer_scale_init_value,
@@ -79,8 +83,9 @@ class ConvNeXt(nn.Module):
             cur += depths[i]
 
         self.apply(self._init_weights)
+        self.to(dtype=dtype, device=device)
 
-    def _init_weights(self, m: Module):
+    def _init_weights(self, m: nn.Module):
         if isinstance(m, (nn.Conv2d, nn.Linear)):
             trunc_normal_(m.weight, std=0.02)
             nn.init.constant_(m.bias, 0)  # type: ignore
