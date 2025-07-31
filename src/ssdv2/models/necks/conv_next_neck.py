@@ -6,11 +6,26 @@ from ssdv2.models.components import ConvNeXtBlock
 
 
 class ConvNeXtNeck(nn.Module):
+    """
+    ConvNeXtNeck
+
+    A object detector neck implemented with ConvNeXt blocks.
+    """
+
     def __init__(
         self,
         depths: list[int] = [3, 3, 3],  # trunk-ignore(ruff/B006)
         dims: list[int] = [576, 672, 720],  # trunk-ignore(ruff/B006)
     ):
+        """
+        Parameters
+        ----------
+        depths:
+            The number of convolutional layers in each ConvNeXtBlock.
+
+        dims:
+            Feature map dimensions at each stage.
+        """
         nn.Module.__init__(self)
 
         # Ensure that the depths and dims have the same length

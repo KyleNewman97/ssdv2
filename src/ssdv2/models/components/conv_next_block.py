@@ -33,7 +33,7 @@ class ConvNeXtBlock(nn.Module):
         layer_scale_init_value: float = 1e-6,
     ):
         """
-            Parameters
+        Parameters
         ----------
         dim:
             Number of input channels.

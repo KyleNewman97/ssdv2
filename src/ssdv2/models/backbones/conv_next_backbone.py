@@ -14,24 +14,9 @@ from ssdv2.models.components import ConvNeXtBlock, LayerNorm
 
 class ConvNeXtBackbone(nn.Module):
     """
-    ConvNeXt
+    ConvNeXtBackbone
+
     A PyTorch impl of : `A ConvNet for the 2020s` - https://arxiv.org/pdf/2201.03545.pdf
-
-    Args:
-        in_chans:
-            Number of input image channels. Default: 3
-
-        depths:
-            Number of blocks at each stage. Default: [3, 3, 9, 3]
-
-        dims:
-            Feature dimension at each stage. Default: [96, 192, 384, 768]
-
-        drop_path_rate:
-            Stochastic depth rate. Default: 0.
-
-        layer_scale_init_value:
-            Init value for Layer Scale. Default: 1e-6.
     """
 
     def __init__(
@@ -42,6 +27,24 @@ class ConvNeXtBackbone(nn.Module):
         drop_path_rate: float = 0.0,
         layer_scale_init_value: float = 1e-6,
     ):
+        """
+        Parameters
+        ----------
+        depths:
+            Number of blocks at each stage. Default: [3, 3, 9, 3]
+
+        dims:
+            Feature dimension at each stage. Default: [96, 192, 384, 768]
+
+        in_chans:
+            Number of input image channels. Default: 3
+
+        drop_path_rate:
+            Stochastic depth rate. Default: 0.
+
+        layer_scale_init_value:
+            Init value for Layer Scale. Default: 1e-6.
+        """
         nn.Module.__init__(self)
 
         # Stem and 3 intermediate downsampling conv layers
