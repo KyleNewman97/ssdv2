@@ -3,7 +3,7 @@ import math
 import torch
 from timm.layers.weight_init import trunc_normal_
 from torch import Tensor, nn
-from torchvision.ops import box_convert
+from torchvision.ops import box_area, box_convert
 
 from ssdv2.models.components import Scale
 from ssdv2.structs import FeatureMap, FrameLabels
@@ -128,14 +128,13 @@ class FCOSHead(nn.Module):
         return torch.stack((x_indices.reshape(-1), y_indices.reshape(-1)), dim=1)
 
     @staticmethod
-    def filter_objects_by_feature_map(
+    def calculate_targets(
         feature_map: FeatureMap, objects: FrameLabels
-    ) -> FrameLabels:
+    ) -> tuple[Tensor, Tensor]:
         """
-        Removes objects that should not be associated with the input feature map. This
-        implements the "multi-level prediction" outlined in the FCOS paper.
-        Specifically, this only keeps objects within the size bound supported by the
-        feature map.
+        Calculates the class ID and box regression targets for a specific feature map.
+        This determines which objects correspond to the feature map, then it allocates
+        the correct class ID and box regression target to each pixel in the feature map.
 
         Parameters
         ----------
@@ -147,8 +146,9 @@ class FCOSHead(nn.Module):
 
         Returns
         -------
-        feature_map_objects:
-            Objects that should be associated with this feature map.
+        class_id_targets:
+
+        regression_targets:
         """
         # Find the minimum object width and height this feature map can support
         min_width = feature_map.fcos_min_object_width
@@ -167,7 +167,23 @@ class FCOSHead(nn.Module):
         object_boxes_xyxy[:, 1::2] *= feature_map.image_height
         class_ids = objects.class_ids
 
+        # Calculate the size of each box - this is used to determine the order of
+        # presidence. That is, if two boxes are competing for the same feature map pixel
+        # then the box with the smaller area gets the pixel
+        box_areas = box_area(object_boxes_xyxy)
+
+        # Descending sort boxes and class ID by box area
+        indices = torch.sort(box_areas, descending=True).indices
+        object_boxes_xyxy = object_boxes_xyxy[indices, :]
+        class_ids = class_ids[indices]
+
         num_locations = image_locations_xy.shape[0]
+
+        # Loop through all ground truth objects and determine if each pixel in the
+        # feature map belongs to the object - additionally calculate the regression
+        # targets for the object at every pixel
+        class_id_targets = class_ids.new_zeros((num_locations,))
+        regression_targets = object_boxes_xyxy.new_zeros((num_locations, 4))
         for object_box_xyxy, class_id in zip(object_boxes_xyxy, class_ids, strict=True):
             # Calculate all regression targets for this box
             dupe_box_xyxy = object_box_xyxy.expand((num_locations, -1))
@@ -175,33 +191,20 @@ class FCOSHead(nn.Module):
             t = image_locations_xy[:, 1] - dupe_box_xyxy[:, 1]
             r = dupe_box_xyxy[:, 2] - image_locations_xy[:, 0]
             b = dupe_box_xyxy[:, 3] - image_locations_xy[:, 1]
-            regression_targets = torch.stack([l, t, r, b], dim=1)
+            obj_reg_targets = torch.stack([l, t, r, b], dim=1)
 
             # Determine if any meet the size requirements
-            mask = min_width <= regression_targets[:, ::2].min(dim=1).values
-            mask &= regression_targets[:, ::2].max(dim=1).values < max_width
-            mask &= min_height <= regression_targets[:, 1::2].min(dim=1).values
-            mask &= regression_targets[:, 1::2].max(dim=1).values < max_height
+            mask = min_width <= obj_reg_targets[:, ::2].max(dim=1).values
+            mask &= obj_reg_targets[:, ::2].max(dim=1).values < max_width
+            mask &= min_height <= obj_reg_targets[:, 1::2].max(dim=1).values
+            mask &= obj_reg_targets[:, 1::2].max(dim=1).values < max_height
+            mask &= 0 < obj_reg_targets.min(dim=1).values  # Must be contained by object
 
-            # Calculate the class targets for this box
-            cls_targets = torch.zeros(
-                (num_locations,), dtype=torch.int, device=mask.device
-            )
-            cls_targets[mask] = class_id
+            # Update the regression targets
+            class_id_targets[mask] = class_id
+            regression_targets[mask] = obj_reg_targets[mask]
 
-        # Find boxes that meet the size condition
-        size_mask = min_width <= objects.boxes[:, 2]
-        size_mask = size_mask.bitwise_and(objects.boxes[:, 2] < max_width)
-        size_mask = size_mask.bitwise_and(min_height < objects.boxes[:, 3])
-        size_mask = size_mask.bitwise_and(objects.boxes[:, 3] < max_height)
-        boxes = objects.boxes[size_mask, :]
-        class_ids = objects.raw_class_ids[size_mask]
-
-        return FrameLabels(
-            boxes=boxes,
-            raw_class_ids=class_ids,
-            raw_class_names=objects.raw_class_names,
-        )
+        return class_id_targets, regression_targets
 
     @staticmethod
     def loss(logits: Tensor, box_regs: Tensor, centerness: Tensor, gt_boxes: Tensor):

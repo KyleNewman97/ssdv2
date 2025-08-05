@@ -67,14 +67,16 @@ class TestFCOSHead:
         )
         assert indices.equal(expected_indices)
 
-    def test_filter_objects_by_feature_map(self):
+    def test_calculate_targets_no_matches(self):
         """
-        Test we can
+        Test we can calculate targets when no objects should be assoicated with this
+        feature map.
         """
         dtype = torch.float32
         device = torch.device("cpu")
 
-        fm_data = torch.rand((1, 384, 20, 20), dtype=dtype, device=device)
+        size = 20
+        fm_data = torch.rand((1, 384, size, size), dtype=dtype, device=device)
         fm = FeatureMap(data=fm_data, stride=32, index=0, all_strides=[32, 16, 8, 4])
         objects = FrameLabels(
             boxes=torch.tensor([[0.2, 0.2, 0.4, 0.4]], dtype=dtype, device=device),
@@ -82,4 +84,47 @@ class TestFCOSHead:
             raw_class_names={0: "person"},
         )
 
-        FCOSHead.filter_objects_by_feature_map(fm, objects)
+        class_ids, regression_targets = FCOSHead.calculate_targets(fm, objects)
+
+        assert isinstance(class_ids, Tensor)
+        expected_shape = (size * size,)
+        assert class_ids.shape == expected_shape
+        expected_class_ids = torch.zeros(expected_shape, dtype=torch.int, device=device)
+        assert class_ids.equal(expected_class_ids)
+
+        assert isinstance(regression_targets, Tensor)
+        expected_shape = (size * size, 4)
+        assert regression_targets.shape == expected_shape
+        expected_targets = torch.zeros(expected_shape, dtype=dtype, device=device)
+        assert regression_targets.allclose(expected_targets)
+
+    def test_calculate_targets_with_match(self):
+        """
+        Test we can calculate targets when an object should be assoicated with the
+        feature map.
+        """
+        dtype = torch.float32
+        device = torch.device("cpu")
+
+        size = 20
+        fm_data = torch.rand((1, 384, size, size), dtype=dtype, device=device)
+        fm = FeatureMap(data=fm_data, stride=32, index=0, all_strides=[32, 16, 8, 4])
+        objects = FrameLabels(
+            boxes=torch.tensor([[0.4, 0.4, 0.6, 0.6]], dtype=dtype, device=device),
+            raw_class_ids=torch.tensor([0], dtype=torch.int, device=device),
+            raw_class_names={0: "person"},
+        )
+
+        class_ids, regression_targets = FCOSHead.calculate_targets(fm, objects)
+
+        assert isinstance(class_ids, Tensor)
+        expected_shape = (size * size,)
+        assert class_ids.shape == expected_shape
+        expected_class_ids = torch.zeros(expected_shape, dtype=torch.int, device=device)
+        assert class_ids.equal(expected_class_ids)
+
+        assert isinstance(regression_targets, Tensor)
+        expected_shape = (size * size, 4)
+        assert regression_targets.shape == expected_shape
+        expected_targets = torch.zeros(expected_shape, dtype=dtype, device=device)
+        assert regression_targets.allclose(expected_targets)
