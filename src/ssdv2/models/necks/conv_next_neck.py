@@ -3,6 +3,7 @@ from timm.layers.weight_init import trunc_normal_
 from torch import Tensor, nn
 
 from ssdv2.models.components import ConvNeXtBlock
+from ssdv2.structs import FeatureMap
 
 
 class ConvNeXtNeck(nn.Module):
@@ -36,8 +37,9 @@ class ConvNeXtNeck(nn.Module):
         self.upsample = nn.Upsample(scale_factor=2, mode="nearest")
 
         # Create the network stages
+        self.num_stages = len(depths)
         self.stages = nn.ModuleList()
-        for i in range(len(depths)):
+        for i in range(self.num_stages):
             stage = nn.Sequential(
                 *[ConvNeXtBlock(dim=dims[i]) for _ in range(depths[i])],
             )
@@ -50,17 +52,26 @@ class ConvNeXtNeck(nn.Module):
             trunc_normal_(m.weight, std=0.02)
             nn.init.constant_(m.bias, 0)  # type: ignore
 
-    def forward(self, feature_maps: list[Tensor]) -> list[Tensor]:
+    def forward(self, feature_maps: list[FeatureMap]) -> list[FeatureMap]:
         reversed_fms = feature_maps[::-1]
 
-        out_fms: list[Tensor] = [reversed_fms[0]]
-        upsampled_fm: Tensor = self.upsample(reversed_fms[0])
+        out_fms: list[FeatureMap] = [reversed_fms[0]]
+        out_fms[0].index = 0
+        out_fms[0].all_strides = out_fms[0].all_strides[::-1]
+        upsampled_fm_data: Tensor = self.upsample(reversed_fms[0].data)
 
         for idx, fm in enumerate(reversed_fms[1:]):
-            fm = torch.cat((upsampled_fm, fm), dim=1)
-            out_fm = self.stages[idx].forward(fm)
-            out_fms.append(out_fm)
+            fm_data = torch.cat((upsampled_fm_data, fm.data), dim=1)
+            out_fm_data: Tensor = self.stages[idx].forward(fm_data)
+            out_fms.append(
+                FeatureMap(
+                    data=out_fm_data,
+                    stride=fm.stride,
+                    index=idx + 1,
+                    all_strides=fm.all_strides[::-1],
+                )
+            )
 
-            upsampled_fm = self.upsample(out_fm)
+            upsampled_fm_data = self.upsample(out_fm_data)
 
         return out_fms
