@@ -87,13 +87,13 @@ class TestFCOSHead:
         class_ids, regression_targets = FCOSHead.calculate_targets(fm, objects)
 
         assert isinstance(class_ids, Tensor)
-        expected_shape = (size * size,)
+        expected_shape = (size, size)
         assert class_ids.shape == expected_shape
         expected_class_ids = torch.zeros(expected_shape, dtype=torch.int, device=device)
         assert class_ids.equal(expected_class_ids)
 
         assert isinstance(regression_targets, Tensor)
-        expected_shape = (size * size, 4)
+        expected_shape = (size, size, 4)
         assert regression_targets.shape == expected_shape
         expected_targets = torch.zeros(expected_shape, dtype=dtype, device=device)
         assert regression_targets.allclose(expected_targets)
@@ -110,21 +110,31 @@ class TestFCOSHead:
         fm_data = torch.rand((1, 384, size, size), dtype=dtype, device=device)
         fm = FeatureMap(data=fm_data, stride=32, index=0, all_strides=[32, 16, 8, 4])
         objects = FrameLabels(
-            boxes=torch.tensor([[0.4, 0.4, 0.6, 0.6]], dtype=dtype, device=device),
+            boxes=torch.tensor([[0.4, 0.6, 0.6, 0.6]], dtype=dtype, device=device),
             raw_class_ids=torch.tensor([0], dtype=torch.int, device=device),
             raw_class_names={0: "person"},
         )
 
         class_ids, regression_targets = FCOSHead.calculate_targets(fm, objects)
 
+        # Check output type and shape is correct
         assert isinstance(class_ids, Tensor)
-        expected_shape = (size * size,)
-        assert class_ids.shape == expected_shape
-        expected_class_ids = torch.zeros(expected_shape, dtype=torch.int, device=device)
+        class_id_shape = (size, size)
+        assert class_ids.shape == class_id_shape
+        assert isinstance(regression_targets, Tensor)
+        regression_shape = (size, size, 4)
+        assert regression_targets.shape == regression_shape
+
+        # Check the class ID assignment is correct - this result was calculated by hand
+        expected_class_ids = torch.zeros(class_id_shape, dtype=torch.int, device=device)
+        expected_class_ids[11:13, 7:9] = 1
         assert class_ids.equal(expected_class_ids)
 
-        assert isinstance(regression_targets, Tensor)
-        expected_shape = (size * size, 4)
-        assert regression_targets.shape == expected_shape
-        expected_targets = torch.zeros(expected_shape, dtype=dtype, device=device)
+        # Check the regression target assignment is correct - this result was calculated
+        # by hand
+        expected_targets = torch.zeros(regression_shape, dtype=dtype, device=device)
+        expected_targets[11, 7, :] = expected_targets.new_tensor([176, 176, 208, 208])
+        expected_targets[11, 8, :] = expected_targets.new_tensor([208, 176, 176, 208])
+        expected_targets[12, 7, :] = expected_targets.new_tensor([176, 208, 208, 176])
+        expected_targets[12, 8, :] = expected_targets.new_tensor([208, 208, 176, 176])
         assert regression_targets.allclose(expected_targets)

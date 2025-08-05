@@ -187,6 +187,7 @@ class FCOSHead(nn.Module):
         for object_box_xyxy, class_id in zip(object_boxes_xyxy, class_ids, strict=True):
             # Calculate all regression targets for this box
             dupe_box_xyxy = object_box_xyxy.expand((num_locations, -1))
+            # trunk-ignore(ruff/E741)
             l = image_locations_xy[:, 0] - dupe_box_xyxy[:, 0]
             t = image_locations_xy[:, 1] - dupe_box_xyxy[:, 1]
             r = dupe_box_xyxy[:, 2] - image_locations_xy[:, 0]
@@ -194,17 +195,20 @@ class FCOSHead(nn.Module):
             obj_reg_targets = torch.stack([l, t, r, b], dim=1)
 
             # Determine if any meet the size requirements
-            mask = min_width <= obj_reg_targets[:, ::2].max(dim=1).values
-            mask &= obj_reg_targets[:, ::2].max(dim=1).values < max_width
-            mask &= min_height <= obj_reg_targets[:, 1::2].max(dim=1).values
-            mask &= obj_reg_targets[:, 1::2].max(dim=1).values < max_height
-            mask &= 0 < obj_reg_targets.min(dim=1).values  # Must be contained by object
+            mask = min_width / 2 <= obj_reg_targets[:, ::2].min(dim=1).values
+            mask &= obj_reg_targets[:, ::2].max(dim=1).values < max_width / 2
+            mask &= min_height / 2 <= obj_reg_targets[:, 1::2].min(dim=1).values
+            mask &= obj_reg_targets[:, 1::2].max(dim=1).values < max_height / 2
 
             # Update the regression targets
             class_id_targets[mask] = class_id
             regression_targets[mask] = obj_reg_targets[mask]
 
-        return class_id_targets, regression_targets
+        # Ensure targets have the same shape as the feature map
+        return (
+            class_id_targets.reshape((feature_map.height, feature_map.width)),
+            regression_targets.reshape((feature_map.height, feature_map.width, 4)),
+        )
 
     @staticmethod
     def loss(logits: Tensor, box_regs: Tensor, centerness: Tensor, gt_boxes: Tensor):
