@@ -7,8 +7,10 @@ from ssdv2.models.necks import ConvNeXtNeck
 
 class SSDv2(nn.Module):
     def __init__(self, num_classes: int):
-        self.backbone = ConvNeXtBackbone(depths=[3, 3, 3, 3], dims=[48, 96, 192, 384])
-        self.neck = ConvNeXtNeck(depths=[0, 3, 3, 3], fm_channels=[384, 192, 96, 48])
+        nn.Module.__init__(self)
+
+        self.backbone = ConvNeXtBackbone(depths=[3, 3, 3, 3], dims=[64, 128, 256, 512])
+        self.neck = ConvNeXtNeck(depths=[0, 3, 3, 3], fm_channels=[64, 128, 256, 512])
         self.head = FCOSHead(num_classes, self.neck.out_fm_channels)
 
     def forward(self, images: Tensor) -> tuple[Tensor, Tensor, Tensor]:

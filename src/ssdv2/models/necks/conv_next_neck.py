@@ -16,7 +16,7 @@ class ConvNeXtNeck(nn.Module):
     def __init__(
         self,
         depths: list[int] = [0, 3, 3, 3],  # trunk-ignore(ruff/B006)
-        fm_channels: list[int] = [384, 192, 96, 48],  # trunk-ignore(ruff/B006)
+        fm_channels: list[int] = [48, 96, 192, 384],  # trunk-ignore(ruff/B006)
     ):
         """
         Parameters
@@ -45,7 +45,7 @@ class ConvNeXtNeck(nn.Module):
         for i in range(self.num_stages):
             # Calculate the number of input and output channels
             in_channels = out_channels + fm_channels[-(i + 1)]
-            out_channels = out_channels + fm_channels[-(i + 1)] // 2
+            out_channels = fm_channels[-(i + 1)]
             self.out_fm_channels.append(out_channels)
 
             # Construct the stage

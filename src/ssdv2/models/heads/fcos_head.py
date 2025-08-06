@@ -230,9 +230,16 @@ class FCOSHead(nn.Module):
             The (x, y) indices of every location of the feature map in the original
             image. This should have a shape of `(fm_height*fm_width, 2)`.
         """
+        dtype = feature_map.data.dtype
+        device = feature_map.data.device
+
         stride = feature_map.stride
-        x_locs = torch.arange(0, feature_map.width * stride, stride) + stride // 2
-        y_locs = torch.arange(0, feature_map.height * stride, stride) + stride // 2
+        width = feature_map.width
+        height = feature_map.height
+        x_locs = torch.arange(0, width * stride, stride, dtype=dtype, device=device)
+        x_locs += stride // 2
+        y_locs = torch.arange(0, height * stride, stride, dtype=dtype, device=device)
+        y_locs += stride // 2
         x_indices, y_indices = torch.meshgrid(x_locs, y_locs, indexing="xy")
 
         return torch.stack((x_indices.reshape(-1), y_indices.reshape(-1)), dim=1)
@@ -371,13 +378,3 @@ class FCOSHead(nn.Module):
             )
 
         return cls_loss, box_loss
-
-    @staticmethod
-    def loss(
-        logits: Tensor,
-        box_regs: Tensor,
-        centerness: Tensor,
-        class_targets: Tensor,
-        regression_targets: Tensor,
-    ):
-        pass
