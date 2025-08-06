@@ -15,8 +15,8 @@ class ConvNeXtNeck(nn.Module):
 
     def __init__(
         self,
-        depths: list[int] = [3, 3, 3],  # trunk-ignore(ruff/B006)
-        dims: list[int] = [576, 672, 720],  # trunk-ignore(ruff/B006)
+        depths: list[int] = [0, 3, 3, 3],  # trunk-ignore(ruff/B006)
+        fm_channels: list[int] = [384, 192, 96, 48],  # trunk-ignore(ruff/B006)
     ):
         """
         Parameters
@@ -30,8 +30,8 @@ class ConvNeXtNeck(nn.Module):
         nn.Module.__init__(self)
 
         # Ensure that the depths and dims have the same length
-        if len(depths) != len(dims):
-            msg = f"len(depths) != len(dims) -> {len(depths)} != {len(dims)}"
+        if len(depths) != len(fm_channels):
+            msg = f"len(depths) != len(dims) -> {len(depths)} != {len(fm_channels)}"
             raise ValueError(msg)
 
         self.upsample = nn.Upsample(scale_factor=2, mode="nearest")
@@ -39,9 +39,19 @@ class ConvNeXtNeck(nn.Module):
         # Create the network stages
         self.num_stages = len(depths)
         self.stages = nn.ModuleList()
+        in_channels = 0
+        out_channels = 0
+        self.out_fm_channels: list[int] = []
         for i in range(self.num_stages):
+            # Calculate the number of input and output channels
+            in_channels = out_channels + fm_channels[-(i + 1)]
+            out_channels = out_channels + fm_channels[-(i + 1)] // 2
+            self.out_fm_channels.append(out_channels)
+
+            # Construct the stage
             stage = nn.Sequential(
-                *[ConvNeXtBlock(dim=dims[i]) for _ in range(depths[i])],
+                nn.Conv2d(in_channels, out_channels, 1),
+                *[ConvNeXtBlock(dim=out_channels) for _ in range(depths[i])],
             )
             self.stages.append(stage)
 
@@ -55,19 +65,21 @@ class ConvNeXtNeck(nn.Module):
     def forward(self, feature_maps: list[FeatureMap]) -> list[FeatureMap]:
         reversed_fms = feature_maps[::-1]
 
-        out_fms: list[FeatureMap] = [reversed_fms[0]]
-        out_fms[0].index = 0
-        out_fms[0].all_strides = out_fms[0].all_strides[::-1]
-        upsampled_fm_data: Tensor = self.upsample(reversed_fms[0].data)
+        upsampled_fm_data: Tensor
+        out_fms: list[FeatureMap] = []
+        for idx, fm in enumerate(reversed_fms):
+            if idx == 0:
+                fm_data = fm.data
+            else:
+                # trunk-ignore(ruff/F821)
+                fm_data = torch.cat((upsampled_fm_data, fm.data), dim=1)  # type: ignore
 
-        for idx, fm in enumerate(reversed_fms[1:]):
-            fm_data = torch.cat((upsampled_fm_data, fm.data), dim=1)
-            out_fm_data: Tensor = self.stages[idx].forward(fm_data)
+            out_fm_data = self.stages[idx].forward(fm_data)
             out_fms.append(
                 FeatureMap(
                     data=out_fm_data,
                     stride=fm.stride,
-                    index=idx + 1,
+                    index=idx,
                     all_strides=fm.all_strides[::-1],
                 )
             )
