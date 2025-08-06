@@ -54,6 +54,13 @@ class FrameLabels(BaseModel):
             ]
         )
 
+    @property
+    def class_ids(self):
+        """
+        Class IDs adjusted to include the background class.
+        """
+        return self.raw_class_ids + 1
+
     @classmethod
     def from_file(
         cls,
