@@ -3,7 +3,13 @@ import math
 import torch
 from timm.layers.weight_init import trunc_normal_
 from torch import Tensor, nn
-from torchvision.ops import box_area, box_convert
+from torch.nn.functional import one_hot
+from torchvision.ops import (
+    box_area,
+    box_convert,
+    complete_box_iou_loss,
+    sigmoid_focal_loss,
+)
 
 from ssdv2.models.components import Scale
 from ssdv2.structs import FeatureMap, FrameLabels
@@ -26,7 +32,7 @@ class FCOSHead(nn.Module):
     this limitation this head has been adapted to only work with a single feature map.
     """
 
-    def __init__(self, num_cls: int, in_channels: int):
+    def __init__(self, num_cls: int, in_channels: list[int]):
         """
         Parameters
         ----------
@@ -34,41 +40,69 @@ class FCOSHead(nn.Module):
             The number of object classes to be able to predict.
 
         in_channels:
-            The number of input channels. This must be a multiple of 32.
+            The number of input channels per feature map. Each one if these should be a
+            multiple of 32.
         """
         nn.Module.__init__(self)
+        self.num_cls = num_cls
 
-        self.cls_path = nn.Sequential(
-            *(
-                [
-                    nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),
-                    nn.GroupNorm(32, in_channels),
-                    nn.ReLU(),
-                ]
-                * 4
-            ),
+        self.cls_path_per_fm = nn.ModuleList(
+            [
+                nn.Sequential(
+                    *(
+                        [
+                            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+                            nn.GroupNorm(32, channels),
+                            nn.ReLU(),
+                        ]
+                        * 4
+                    ),
+                )
+                for channels in in_channels
+            ]
         )
-        self.box_path = nn.Sequential(
-            *(
-                [
-                    nn.Conv2d(in_channels, in_channels, kernel_size=3, padding=1),
-                    nn.GroupNorm(32, in_channels),
-                    nn.ReLU(),
-                ]
-                * 4
-            )
+        self.box_path_per_fm = nn.ModuleList(
+            [
+                nn.Sequential(
+                    *(
+                        [
+                            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+                            nn.GroupNorm(32, channels),
+                            nn.ReLU(),
+                        ]
+                        * 4
+                    )
+                )
+                for channels in in_channels
+            ]
         )
 
-        self.cls_logits = nn.Conv2d(in_channels, num_cls, kernel_size=3, padding=1)
-        self.box_pred = nn.Conv2d(in_channels, 4, kernel_size=3, padding=1)
-        self.centerness = nn.Conv2d(in_channels, 1, kernel_size=3, padding=1)
+        self.cls_logits_per_fm = nn.ModuleList(
+            [
+                nn.Conv2d(channels, num_cls, kernel_size=3, padding=1)
+                for channels in in_channels
+            ]
+        )
+        self.box_pred_per_fm = nn.ModuleList(
+            [
+                nn.Conv2d(channels, 4, kernel_size=3, padding=1)
+                for channels in in_channels
+            ]
+        )
+        self.centerness_per_fm = nn.ModuleList(
+            [
+                nn.Conv2d(channels, 1, kernel_size=3, padding=1)
+                for channels in in_channels
+            ]
+        )
 
         self.apply(self._init_weights)
 
         # Initialise the bias for the focal loss
         prior_prob = 0.01
         bias_value = -math.log((1 - prior_prob) / prior_prob)
-        nn.init.constant_(self.cls_logits.bias, bias_value)  # type: ignore
+        for cls_logits in self.cls_logits_per_fm:
+            nn.init.constant_(cls_logits.bias, bias_value)  # type: ignore
 
         # Initialise the scale - this gets applied to the regressed bounding boxes
         self.scale = Scale(initial_value=1)
@@ -78,21 +112,97 @@ class FCOSHead(nn.Module):
             trunc_normal_(m.weight, std=0.01)
             nn.init.constant_(m.bias, 0)  # type: ignore
 
-    def forward(self, feature_map: FeatureMap) -> tuple[Tensor, Tensor, Tensor]:
-        # Run the feature map through the class and box paths
-        cls_out: Tensor = self.cls_path(feature_map.data)
-        box_out: Tensor = self.box_path(feature_map.data)
+    def forward(self, feature_maps: list[FeatureMap]) -> tuple[Tensor, Tensor, Tensor]:
+        all_logits = []
+        all_centerness = []
+        all_boxes = []
+        for fm in feature_maps:
+            # Run the feature map through the class and box paths
+            cls_path_out: Tensor = self.cls_path_per_fm[fm.index](fm.data)
+            box_path_out: Tensor = self.box_path_per_fm[fm.index](fm.data)
 
-        # Predict the logits and centerness
-        logits = self.cls_logits(cls_out)
-        centerness = self.centerness(cls_out)
+            # Predict the logits and centerness
+            logits: Tensor = self.cls_logits_per_fm[fm.index](cls_path_out)
+            centerness: Tensor = self.centerness_per_fm[fm.index](box_path_out)
 
-        # Predict the boxes
-        box_pred: Tensor = self.box_pred(box_out)
-        box_pred = self.scale(box_pred)
-        box_reg = torch.exp(box_pred)
+            # Predict the boxes
+            box_predictions: Tensor = self.box_pred_per_fm[fm.index](box_path_out)
+            box_predictions = self.scale(box_predictions)
+            boxes_delta = torch.exp(box_predictions)
 
-        return logits, box_reg, centerness
+            # Convert boxes from delta domain to image domain
+            locations = FCOSHead.calculate_feature_map_locations(fm)
+            boxes_image = FCOSHead.delta_to_image_domain(boxes_delta, locations)
+
+            # Convert shape to (batch, h*w, d)
+            batch_size = logits.shape[0]
+            logits = logits.permute(0, 2, 3, 1)
+            logits = logits.reshape(batch_size, -1, self.num_cls)
+            centerness = centerness.permute(0, 2, 3, 1)
+            centerness = centerness.reshape(batch_size, -1, 1)
+            boxes_image = boxes_image.permute(0, 2, 3, 1)
+            boxes_image = boxes_image.reshape(batch_size, -1, 4)
+
+            all_logits.append(logits)
+            all_centerness.append(centerness)
+            all_boxes.append(boxes_image)
+
+        all_logits = torch.cat(all_logits, dim=1)
+        all_centerness = torch.cat(all_centerness, dim=1)
+        all_boxes = torch.cat(all_boxes, dim=1)
+
+        return all_logits, all_centerness, all_boxes
+
+    @staticmethod
+    def delta_to_image_domain(boxes_delta: Tensor, locations: Tensor) -> Tensor:
+        """
+        Converts boxes from the delta domain `(l^*, t^*, r^*, b^*)` to the image
+        domain `(l, t, r, b)` (in image pixels). This conversion is done with the
+        following equations:
+
+            ```
+            l = x_loc - l^*
+            t = y_loc - t^*
+            r = r^* + x_loc
+            b = b^* + y_loc
+            ```
+
+        Parameters
+        ----------
+        boxes_delta:
+            Boxes in the delta domain, with shape `(batch_size, 4, y, x)`. Where `x` and
+            `y` indicate the indices into the feature map. The four elements in the
+            second dimension are `(l^*, t^*, r^*, b^*)`.
+
+        locations:
+            The location of each feature map pixel in the original image. This should
+            have a shape of `(y*x, 2)`. The second dimension has elements
+            `(x_loc, y_loc)`.
+
+        Returns
+        -------
+        boxes_image:
+            Boxes in the image domain, with shape `(batch_size, 4, y, x)`. Where `x` and
+            `y` indicate the indices into the feature map. The four elements in the
+            second dimension are `(l, t, r, b)`.
+        """
+        # Convert the locations tensor to the same shape as the box deltas
+        batch_size = boxes_delta.shape[0]
+        height = boxes_delta.shape[2]
+        width = boxes_delta.shape[3]
+        locations = locations.reshape((height, width, 2))
+        locations = locations.unsqueeze(0)  # Add a batch dim
+        locations = locations.repeat(batch_size, 1, 1, 1)  # Populate batch
+        locations = locations.permute(0, 3, 1, 2)  # (B, H, W, L) ->  (B, L, H, W)
+
+        # Convert to image domain
+        box_image = boxes_delta
+        box_image[:, 0, :, :] = locations[:, 0, :, :] - box_image[:, 0, :, :]  # left
+        box_image[:, 1, :, :] = locations[:, 1, :, :] - box_image[:, 1, :, :]  # top
+        box_image[:, 2, :, :] = locations[:, 0, :, :] + box_image[:, 2, :, :]  # right
+        box_image[:, 3, :, :] = locations[:, 1, :, :] + box_image[:, 3, :, :]  # bottom
+
+        return box_image
 
     @staticmethod
     def calculate_feature_map_locations(
@@ -130,7 +240,7 @@ class FCOSHead(nn.Module):
     @staticmethod
     def calculate_targets(
         feature_map: FeatureMap, objects: FrameLabels
-    ) -> tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Tensor]:
         """
         Calculates the class ID and box regression targets for a specific feature map.
         This determines which objects correspond to the feature map, then it allocates
@@ -148,7 +258,9 @@ class FCOSHead(nn.Module):
         -------
         class_id_targets:
 
-        regression_targets:
+        box_delta_targets:
+
+        box_image_targets
         """
         # Find the minimum object width and height this feature map can support
         min_width = feature_map.fcos_min_object_width
@@ -183,7 +295,8 @@ class FCOSHead(nn.Module):
         # feature map belongs to the object - additionally calculate the regression
         # targets for the object at every pixel
         class_id_targets = class_ids.new_zeros((num_locations,))
-        regression_targets = object_boxes_xyxy.new_zeros((num_locations, 4))
+        box_delta_targets = object_boxes_xyxy.new_zeros((num_locations, 4))
+        box_image_targets = object_boxes_xyxy.new_zeros((num_locations, 4))
         for object_box_xyxy, class_id in zip(object_boxes_xyxy, class_ids, strict=True):
             # Calculate all regression targets for this box
             dupe_box_xyxy = object_box_xyxy.expand((num_locations, -1))
@@ -192,24 +305,79 @@ class FCOSHead(nn.Module):
             t = image_locations_xy[:, 1] - dupe_box_xyxy[:, 1]
             r = dupe_box_xyxy[:, 2] - image_locations_xy[:, 0]
             b = dupe_box_xyxy[:, 3] - image_locations_xy[:, 1]
-            obj_reg_targets = torch.stack([l, t, r, b], dim=1)
+            box_deltas = torch.stack([l, t, r, b], dim=1)
 
             # Determine if any meet the size requirements
-            mask = min_width / 2 <= obj_reg_targets[:, ::2].min(dim=1).values
-            mask &= obj_reg_targets[:, ::2].max(dim=1).values < max_width / 2
-            mask &= min_height / 2 <= obj_reg_targets[:, 1::2].min(dim=1).values
-            mask &= obj_reg_targets[:, 1::2].max(dim=1).values < max_height / 2
+            mask = min_width / 2 <= box_deltas[:, ::2].min(dim=1).values
+            mask &= box_deltas[:, ::2].max(dim=1).values < max_width / 2
+            mask &= min_height / 2 <= box_deltas[:, 1::2].min(dim=1).values
+            mask &= box_deltas[:, 1::2].max(dim=1).values < max_height / 2
 
             # Update the regression targets
             class_id_targets[mask] = class_id
-            regression_targets[mask] = obj_reg_targets[mask]
+            box_delta_targets[mask, :] = box_deltas[mask, :]
+            box_image_targets[mask, :] = dupe_box_xyxy[mask, :]
 
-        # Ensure targets have the same shape as the feature map
-        return (
-            class_id_targets.reshape((feature_map.height, feature_map.width)),
-            regression_targets.reshape((feature_map.height, feature_map.width, 4)),
-        )
+        return class_id_targets, box_delta_targets, box_image_targets
 
     @staticmethod
-    def loss(logits: Tensor, box_regs: Tensor, centerness: Tensor, gt_boxes: Tensor):
+    def batch_loss(
+        batch_feature_maps: list[list[FeatureMap]],
+        objects: list[FrameLabels],
+        batch_logits: Tensor,
+        batch_box_predictions: Tensor,
+        batch_centerness: Tensor,
+    ):
+        # Calculate the class and regression targets for each image in the batch
+        batch_cls_targets = []
+        batch_box_targets = []
+        for idx, image_fms in enumerate(batch_feature_maps):
+            # Calculate the class and regression targets for each feature map in the
+            # image
+            image_cls_targets = []
+            image_box_targets = []
+            for fm in image_fms:
+                cls_targs, _, box_targs = FCOSHead.calculate_targets(fm, objects[idx])
+                image_cls_targets.append(cls_targs)
+                image_box_targets.append(box_targs)
+
+            batch_cls_targets.append(torch.cat(image_cls_targets, dim=0))
+            batch_box_targets.append(torch.cat(image_box_targets, dim=0))
+
+        batch_cls_targets = torch.stack(batch_cls_targets, dim=0)
+        batch_box_targets = torch.stack(batch_box_targets, dim=0)
+
+        # One hot encode the class targets
+        num_classes = batch_logits.shape[-1]
+        batch_one_hot_targets = one_hot(batch_cls_targets, num_classes)
+
+        # Calculate the class loss
+        cls_loss = sigmoid_focal_loss(
+            batch_logits, batch_one_hot_targets, reduction="mean", alpha=-1, gamma=2
+        )
+
+        # Calculate the box loss - making sure to only calculate the loss on boxes that
+        # are associated with a class
+        box_loss = 0
+        for im_cls_targets, im_box_targets, im_box_predictions in zip(
+            batch_cls_targets, batch_box_targets, batch_box_predictions, strict=True
+        ):
+            mask = im_cls_targets != 0
+            box_targets = im_box_targets[mask, :]
+            box_predictions = im_box_predictions[mask, :]
+            box_loss += (
+                complete_box_iou_loss(box_predictions, box_targets, reduction="sum")
+                / mask.sum()
+            )
+
+        return cls_loss, box_loss
+
+    @staticmethod
+    def loss(
+        logits: Tensor,
+        box_regs: Tensor,
+        centerness: Tensor,
+        class_targets: Tensor,
+        regression_targets: Tensor,
+    ):
         pass
